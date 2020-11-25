@@ -3,8 +3,9 @@ import bindbc.OpenSLES.types;
 import bindbc.OpenSLES.android;
 import core.sys.posix.pthread;
 import arsd.jni;
+import log;
+import std.array;
 
-enum SL_I3DL2_ENVIRONMENT_PRESET_STONECORRIDOR = SLEnvironmentalReverbSettings(- 1000 , - 237 , 2700 , 790 , - 1214 , 13 , 395 , 20 , 1000 , 1000 );
 alias jint = int;
 
 /**
@@ -24,7 +25,7 @@ static SLEngineItf engine;
 *   Output mix interfaces
 */
 static SLObjectItf outputMixObject = null;
-static SLEnvironmentalReverbItf outputMixEnviromentalReverb = null;
+static SLEnvironmentalReverbItf outputMixEnvironmentalReverb = null;
 
 /** Reverb effect*/
 static const SLEnvironmentalReverbSettings reverbSettings = 
@@ -76,9 +77,9 @@ void printErr(string[] err)
 
 static BufferQueuePlayer bq;
 
-void sliCreateOutputContext()
+string sliCreateOutputContext()
 {
-    string[] errorMessages;
+    string[] errorMessages = [];
     SLresult res = slCreateEngine(&engineObject,0,null,0,null,null);
     if(!wasSuccess(res))
         errorMessages~= getSLESErr("Could not create engine");
@@ -93,7 +94,6 @@ void sliCreateOutputContext()
     if(!wasSuccess(res))
         errorMessages~= getSLESErr("Could not get an interface for creating objects");
     
-    //Set environmental reverb as a non required interface
     const(SLInterfaceID)* ids = [SL_IID_ENVIRONMENTALREVERB].ptr;
     const(SLboolean)* req = [SL_BOOLEAN_FALSE].ptr;
 
@@ -105,16 +105,51 @@ void sliCreateOutputContext()
     if(!wasSuccess(res))
         errorMessages~= getSLESErr("Could not realize|initialize output mix");
     
+
     res = (*outputMixObject).GetInterface(outputMixObject, 
-          SL_IID_ENVIRONMENTALREVERB, &outputMixEnviromentalReverb);
+          SL_IID_ENVIRONMENTALREVERB, &outputMixEnvironmentalReverb);
     if(!wasSuccess(res))
         errorMessages~= getSLESErr("Could not get any Reverb support");
     else
     {
-        res = (*outputMixEnviromentalReverb).SetEnvironmentalReverbProperties(
-            outputMixEnviromentalReverb, &reverbSettings
-        );
+        // res = (*outputMixEnviromentalReverb).SetEnvironmentalReverbProperties(
+        //     outputMixEnviromentalReverb, &reverbSettings
+        // );
     }
+
+    string msgs = "";
+    import std.conv:to;
+    for(ulong i = 0, len = errorMessages.length; i < len; i++)
+    {
+        msgs~=errorMessages[i]~"\n";
+        __android_log_print(android_LogPriority.ANDROID_LOG_FATAL, "FATAL!", errorMessages[i].ptr);
+    }
+    __android_log_print(android_LogPriority.ANDROID_LOG_FATAL, "FATAL!", "MEU DEUS MANO");
+    return msgs;
+    // return errorMessages.join("\n");
+}
+
+string tryCreate()
+{
+    slCreateEngine( &engineObject, 0, null, 0, null, null );
+    (*engineObject).Realize( engineObject, SL_BOOLEAN_FALSE );
+    (*engineObject).GetInterface( engineObject, SL_IID_ENGINE, &engine );
+    SLObjectItf output_mix_obj;
+    SLVolumeItf output_mix_vol;
+    
+    const SLInterfaceID* ids = [SL_IID_VOLUME].ptr;
+    const SLboolean* req = [SL_BOOLEAN_FALSE].ptr;
+    
+    (*engine).CreateOutputMix( engine, &output_mix_obj, 1, ids, req );
+    
+    (*output_mix_obj).Realize( output_mix_obj, SL_BOOLEAN_FALSE );
+    
+    if( (*output_mix_obj).GetInterface( output_mix_obj,
+        SL_IID_VOLUME, &output_mix_vol ) != SL_RESULT_SUCCESS )
+        output_mix_vol = null;
+
+    return "okay?";
+
 }
 
 
@@ -228,8 +263,10 @@ void sliCreateOutputContext()
 
 final class MainActivity : JavaClass!("com.hipreme.zenambience", MainActivity)
 {
-    @Export void tryInit()
+    @Export string tryInit()
     {
-        sliCreateOutputContext();
+        import core.runtime:rt_init;
+        rt_init();
+        return sliCreateOutputContext();
     }
 }

@@ -1,2 +1,2 @@
 set androidPath=C:\Users\Hipreme\AppData\Local\Android\Sdk\ndk\21.3.6528147\toolchains\llvm\prebuilt\windows-x86_64\sysroot\usr\lib\aarch64-linux-android\30\
-ldc2 -I=../bindbc -L=-lOpenSLES -L=-L%androidPath% -mtriple=aarch64--linux-android --shared opensles_interface.d ../bindbc/OpenSLES/types.d ../bindbc/OpenSLES/android.d ../bindbc/OpenSLES/android_metadata.d ../bindbc/OpenSLES/android_configuration.d jni.d
+ldc2 -I=../bindbc -L=-L%androidPath%  -L=-lOpenSLES -L=-llog -mtriple=aarch64--linux-android --shared opensles_interface.d ../bindbc/OpenSLES/types.d ../bindbc/OpenSLES/android.d ../bindbc/OpenSLES/android_metadata.d ../bindbc/OpenSLES/android_configuration.d jni.d
