@@ -1,4 +1,6 @@
 module bindbc.OpenSLES.android;
+public import bindbc.OpenSLES.android_configuration;
+public import bindbc.OpenSLES.android_metadata;
 alias jobject = void*;
 
 /*
@@ -27,9 +29,9 @@ import bindbc.OpenSLES.android_metadata;// #include "OpenSLES_AndroidMetadata.h"
 /*---------------------------------------------------------------------------*/
 
 extern(C):
-alias SLAint64 = sl_int64_t;          /* 64 bit signed integer   */
+alias SLAint64 = const(const(sl_int64_t*));          /* 64 bit signed integer   */
 
-alias SLAuint64 = sl_uint64_t;         /* 64 bit unsigned integer */
+alias SLAuint64 = const(const(sl_uint64_t*));         /* 64 bit unsigned integer */
 
 /*---------------------------------------------------------------------------*/
 /* Android PCM Data Format                                                   */
@@ -81,7 +83,7 @@ enum SL_ANDROID_SPEAKER_USE_DEFAULT =  (cast(SLuint32)0);
 /* Android Effect interface                                                  */
 /*---------------------------------------------------------------------------*/
 
-const SLInterfaceID SL_IID_ANDROIDEFFECT;
+extern __gshared const(const(SLInterfaceID_)*) SL_IID_ANDROIDEFFECT;
 
 /** Android Effect interface methods */
 
@@ -103,14 +105,14 @@ struct SLAndroidEffectItf_ {
             SLuint32 *replySize,
             void *pReplyData) SendCommand;
 }
-alias SLAndroidEffectItf = SLAndroidEffectItf_*;
+alias SLAndroidEffectItf = const(const(SLAndroidEffectItf_)*)*;
 
 
 /*---------------------------------------------------------------------------*/
 /* Android Effect Send interface                                             */
 /*---------------------------------------------------------------------------*/
 
-const SLInterfaceID SL_IID_ANDROIDEFFECTSEND;
+extern __gshared const(const(SLInterfaceID_)*) SL_IID_ANDROIDEFFECTSEND;
 
 /** Android Effect Send interface methods */
 
@@ -146,14 +148,14 @@ struct SLAndroidEffectSendItf_ {
         SLmillibel *pSendLevel
     ) GetSendLevel;
 }
-alias SLAndroidEffectSendItf = SLAndroidEffectSendItf_*;
+alias SLAndroidEffectSendItf = const(const(SLAndroidEffectSendItf_)*)*;
 
 
 /*---------------------------------------------------------------------------*/
 /* Android Effect Capabilities interface                                     */
 /*---------------------------------------------------------------------------*/
 
-const SLInterfaceID SL_IID_ANDROIDEFFECTCAPABILITIES;
+extern __gshared const(const(SLInterfaceID_)*) SL_IID_ANDROIDEFFECTCAPABILITIES;
 
 /** Android Effect Capabilities interface methods */
 
@@ -171,13 +173,13 @@ struct SLAndroidEffectCapabilitiesItf_ {
             SLchar *pName,
             SLuint16 *pNameSize) QueryEffect;
 }
-alias SLAndroidEffectCapabilitiesItf = SLAndroidEffectCapabilitiesItf_*;
+alias SLAndroidEffectCapabilitiesItf = const(const(SLAndroidEffectCapabilitiesItf_)*)*;
 
 
 /*---------------------------------------------------------------------------*/
 /* Android Configuration interface                                           */
 /*---------------------------------------------------------------------------*/
-const SLInterfaceID SL_IID_ANDROIDCONFIGURATION;
+extern __gshared const(const(SLInterfaceID_)*) SL_IID_ANDROIDCONFIGURATION;
 
 /** Android Configuration interface methods */
 
@@ -207,14 +209,15 @@ struct SLAndroidConfigurationItf_ {
     SLresult function (SLAndroidConfigurationItf self,
             SLuint32 proxyType) ReleaseJavaProxy;
 }
-alias SLAndroidConfigurationItf = SLAndroidConfigurationItf_*;
+alias SLAndroidConfigurationItf = const(const(SLAndroidConfigurationItf_)*)*;
 
 
 /*---------------------------------------------------------------------------*/
 /* Android Simple Buffer Queue Interface                                     */
 /*---------------------------------------------------------------------------*/
 
-const SLInterfaceID SL_IID_ANDROIDSIMPLEBUFFERQUEUE;
+extern __gshared const(const(SLInterfaceID_)*) SL_IID_ANDROIDSIMPLEBUFFERQUEUE;
+alias /*SLAPIENTRY*/slAndroidSimpleBufferQueueCallback = extern(C) void function(SLAndroidSimpleBufferQueueItf caller, void* pContext);
 
 struct SLAndroidSimpleBufferQueueItf_ {
 	SLresult function (
@@ -229,14 +232,19 @@ struct SLAndroidSimpleBufferQueueItf_ {
 		SLAndroidSimpleBufferQueueItf self,
 		SLAndroidSimpleBufferQueueState *pState
 	) GetState;
-	SLresult function (
+    extern(C) SLresult function (
 		SLAndroidSimpleBufferQueueItf self,
 		slAndroidSimpleBufferQueueCallback callback,
 		void* pContext
 	) RegisterCallback;
+
+	// SLresult function (
+	// 	SLAndroidSimpleBufferQueueItf self,
+	// 	slAndroidSimpleBufferQueueCallback callback,
+	// 	void* pContext
+	// ) RegisterCallback;
 }
-alias SLAndroidSimpleBufferQueueItf = SLAndroidSimpleBufferQueueItf_*;
-alias /*SLAPIENTRY*/slAndroidSimpleBufferQueueCallback = void function(SLAndroidSimpleBufferQueueItf caller, void* pContext);
+alias SLAndroidSimpleBufferQueueItf = const(const(SLAndroidSimpleBufferQueueItf_)*)*;
 
 /** Android simple buffer queue state **/
 struct SLAndroidSimpleBufferQueueState {
@@ -249,7 +257,7 @@ struct SLAndroidSimpleBufferQueueState {
 /* Android Buffer Queue Interface                                            */
 /*---------------------------------------------------------------------------*/
 
-const SLInterfaceID SL_IID_ANDROIDBUFFERQUEUESOURCE;
+extern __gshared const(const(SLInterfaceID_)*) SL_IID_ANDROIDBUFFERQUEUESOURCE;
 
 
 enum SL_ANDROID_ITEMKEY_NONE              = (cast(SLuint32) 0x00000000);
@@ -326,7 +334,7 @@ struct SLAndroidBufferQueueItf_ {
             SLuint32 *pEventFlags
     ) GetCallbackEventsMask;
 }
-alias SLAndroidBufferQueueItf = SLAndroidBufferQueueItf_*;
+alias SLAndroidBufferQueueItf = const(const(SLAndroidBufferQueueItf_)*)*;
 
 
 /*---------------------------------------------------------------------------*/
@@ -386,7 +394,7 @@ enum SL_ANDROID_MIME_AACADTS = (cast(SLchar *) "audio/vnd.android.aac-adts");
 /*---------------------------------------------------------------------------*/
 /* Acoustic Echo Cancellation (AEC) Interface                                */
 /* --------------------------------------------------------------------------*/
-const SLInterfaceID SL_IID_ANDROIDACOUSTICECHOCANCELLATION;
+extern __gshared const(const(SLInterfaceID_)*) SL_IID_ANDROIDACOUSTICECHOCANCELLATION;
 
 
 struct SLAndroidAcousticEchoCancellationItf_ {
@@ -399,12 +407,12 @@ struct SLAndroidAcousticEchoCancellationItf_ {
         SLboolean *pEnabled
     ) IsEnabled;
 }
-alias SLAndroidAcousticEchoCancellationItf = SLAndroidAcousticEchoCancellationItf_*;
+alias SLAndroidAcousticEchoCancellationItf = const(const(SLAndroidAcousticEchoCancellationItf_)*)*;
 
 /*---------------------------------------------------------------------------*/
 /* Automatic Gain Control (ACC) Interface                                    */
 /* --------------------------------------------------------------------------*/
-const SLInterfaceID SL_IID_ANDROIDAUTOMATICGAINCONTROL;
+extern __gshared const(const(SLInterfaceID_)*) SL_IID_ANDROIDAUTOMATICGAINCONTROL;
 
 
 struct SLAndroidAutomaticGainControlItf_ {
@@ -417,12 +425,12 @@ struct SLAndroidAutomaticGainControlItf_ {
         SLboolean *pEnabled
     ) IsEnabled;
 }
-alias SLAndroidAutomaticGainControlItf = SLAndroidAutomaticGainControlItf_*;
+alias SLAndroidAutomaticGainControlItf = const(const(SLAndroidAutomaticGainControlItf_)*)*;
 
 /*---------------------------------------------------------------------------*/
 /* Noise Suppression Interface                                               */
 /* --------------------------------------------------------------------------*/
-const SLInterfaceID SL_IID_ANDROIDNOISESUPPRESSION;
+extern __gshared const(const(SLInterfaceID_)*) SL_IID_ANDROIDNOISESUPPRESSION;
 
 
 struct SLAndroidNoiseSuppressionItf_ {
@@ -435,4 +443,4 @@ struct SLAndroidNoiseSuppressionItf_ {
         SLboolean *pEnabled
     ) IsEnabled;
 }
-alias SLAndroidNoiseSuppressionItf = SLAndroidNoiseSuppressionItf_*;
+alias SLAndroidNoiseSuppressionItf = const(const(SLAndroidNoiseSuppressionItf_)*)*;
