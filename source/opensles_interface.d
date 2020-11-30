@@ -1,12 +1,30 @@
 module opensles_interface;
 import bindbc.OpenSLES.types;
 import bindbc.OpenSLES.android;
+import std.algorithm.searching:count;
 import core.sys.posix.pthread;
 import arsd.jni;
 import log;
-import std.array;
 
-alias jint = int;
+
+string join(T)(T[] array, string separator)
+{
+    string ret;
+    bool isFirst = false;
+    import std.conv:to;
+    foreach (key; array)
+    {
+        if(!isFirst)
+            ret~=separator;
+        else
+            isFirst = true;
+        ret~= to!string(key);
+    }
+    return ret;
+}
+
+
+
 
 /**
 *   This file is meant to provide a higher level interface OpenAL-alike
@@ -14,29 +32,16 @@ alias jint = int;
 * the steps from the audioprogramming blog, as it is currently private, I'm bringing it what I could find.
 */
 
-/**
-* Engine interface
-*/
-static SLObjectItf engineObject = null;
-static SLEngineItf engine;
 
-
-/**
-*   Output mix interfaces
-*/
-static SLObjectItf outputMixObject = null;
-static SLEnvironmentalReverbItf outputMixEnvironmentalReverb = null;
-
-/** Reverb effect*/
-static const SLEnvironmentalReverbSettings reverbSettings = 
-    SL_I3DL2_ENVIRONMENT_PRESET_STONECORRIDOR;
-
-private bool wasSuccess(ref SLresult res)
+private bool slError(SLresult res)
 {
-    return res == SL_RESULT_SUCCESS;
+    return res != SL_RESULT_SUCCESS;
 }
-private string getSLESErr(string msg)
+private string getSLESErr(string msg, string func = __PRETTY_FUNCTION__, uint line = __LINE__)
 {
+    import std.conv:to;
+    __android_log_print(android_LogPriority.ANDROID_LOG_ERROR, "OpenSL ES Error",
+    (func~":"~to!string(line)~"\n\t"~msg).ptr);
     return "OpenSL ES Error:\n\t"~msg;
 }
 
@@ -53,7 +58,7 @@ struct BufferQueuePlayer
     * device native buffer size is another factor to minimize audio latency, not used in this
     * sample: we only play one giant buffer here
     */
-    jint   playerBufferSize = 0;
+    int   playerBufferSize = 0;
     short* resampleBuf = null;
 }
 
@@ -75,191 +80,386 @@ void printErr(string[] err)
     }
 }
 
+
+struct SLIOutputMix
+{
+    SLEnvironmentalReverbItf environmentReverb;
+    SLPresetReverbItf presetReverb;
+    SLBassBoostItf bassBoost;
+    SLEqualizerItf equalizer;
+    SLVirtualizerItf virtualizer;
+    SLObjectItf outputMixObj;
+
+
+    static bool initializeForAndroid(ref SLIOutputMix output, ref SLEngineItf e)
+    {
+        //All those interfaces are supported on Android, so, require it
+        const(SLInterfaceID)* ids = 
+        [
+            SL_IID_ENVIRONMENTALREVERB,
+            SL_IID_PRESETREVERB,
+            SL_IID_BASSBOOST,
+            SL_IID_EQUALIZER,
+            SL_IID_VIRTUALIZER
+        ].ptr;
+        const(SLboolean)* req = 
+        [
+            SL_BOOLEAN_TRUE,
+            SL_BOOLEAN_TRUE,
+            SL_BOOLEAN_TRUE,
+            SL_BOOLEAN_TRUE,
+            SL_BOOLEAN_TRUE //5
+        ].ptr;
+
+        string[] err;
+        SLresult r;
+        with(output)
+        {
+            r = (*e).CreateOutputMix(e, &outputMixObj, 5, ids, req);
+            if(slError(r))
+                err~= getSLESErr("Could not create output mix");
+            //Do it assyncly
+            r = (*outputMixObj).Realize(outputMixObj, SL_BOOLEAN_FALSE);
+            if(slError(r))
+                err~= getSLESErr("Could not initialize output mix");
+
+            
+            if(slError((*outputMixObj).GetInterface(outputMixObj, SL_IID_ENVIRONMENTALREVERB, &environmentReverb)))
+            {
+                err~=getSLESErr("Could not get the ENVIRONMENTALREVERB interface");
+                environmentReverb = null;
+            }
+            if(slError((*outputMixObj).GetInterface(outputMixObj, SL_IID_PRESETREVERB, &presetReverb)))
+            {
+                err~=getSLESErr("Could not get the PRESETREVERB interface");
+                presetReverb = null;
+            }
+            if(slError((*outputMixObj).GetInterface(outputMixObj, SL_IID_BASSBOOST, &bassBoost)))
+            {
+                err~=getSLESErr("Could not get the BASSBOOST interface");
+                bassBoost = null;
+            }
+            if(slError((*outputMixObj).GetInterface(outputMixObj, SL_IID_EQUALIZER, &equalizer)))
+            {
+                err~=getSLESErr("Could not get the EQUALIZER interface");
+                equalizer = null;
+            }
+            if(slError((*outputMixObj).GetInterface(outputMixObj, SL_IID_VIRTUALIZER, &virtualizer)))
+            {
+                err~=getSLESErr("Could not get the VIRTUALIZER interface");
+                virtualizer = null;
+            }
+        }
+        return r==SL_RESULT_SUCCESS && err.length==0;
+    }
+}
+
+
+float toAttenuation(float gain)
+{
+    import std.math:log10;
+    return (gain < 0.01f) ? -96.0f : 20 * log10(gain);
+}
+
+string getAndroidAudioPlayerInterfaces()
+{
+    string itfs = "SL_IID_VOLUME, SL_IID_EFFECTSEND, SL_IID_METADATAEXTRACTION";
+    version(Android)
+    {
+        itfs~=", SL_IID_ANDROIDSIMPLEBUFFERQUEUE";
+    }
+    return itfs;
+}
+string getAndroidAudioPlayerRequirements()
+{
+    string req;
+    bool isFirst = true;
+    foreach (i; 0..getAndroidAudioPlayerInterfaces().count(",")+1)
+    {
+        if(isFirst)isFirst=!isFirst;
+        else req~=",";
+        req~= "SL_BOOLEAN_TRUE";
+    }
+    return req;
+}
+
+struct SLIAudioPlayer
+{
+    ///The Audio player
+    SLObjectItf playerObj;
+    ///Play/stop/pause the audio
+    SLPlayItf player;
+    ///Controls the volume
+    SLVolumeItf playerVol;
+    ///Ability to get and set the audio duration
+    SLSeekItf playerSeek;
+    ///@TODO
+    SLEffectSendItf playerEffectSend;
+    ///@TODO
+    SLMetadataExtractionItf playerMetadata;
+
+    version(Android){SLAndroidSimpleBufferQueueItf playerAndroidSimpleBufferQueue;}
+    else  //Those lines will appear just as a documentation, right now, we don't have any implementation using it
+    {
+        ///@NO_SUPPORT
+        SL3DSourceItf source3D;
+        SL3DDopplerItf doppler3D;
+        SL3DLocationItf location3D;
+    }
+    bool isPlaying, hasFinishedTrack;
+
+    float volume;
+
+    static void setVolume(ref SLIAudioPlayer audioPlayer, float gain)
+    {
+        with(audioPlayer)
+        {
+            (*playerVol).SetVolumeLevel(playerVol, cast(SLmillibel)(toAttenuation(gain)*100));
+            volume = gain;
+        }
+    }
+
+    static void destroyAudioPlayer(ref SLIAudioPlayer audioPlayer)
+    {
+        with(audioPlayer)
+        {
+            (*playerObj).Destroy(playerObj);
+            playerObj = null;
+            player = null;
+            playerVol = null;
+            playerSeek = null;
+            playerEffectSend = null;
+            version(Android){playerAndroidSimpleBufferQueue = null;}
+
+        }
+    }
+
+    extern(C) static void checkClipEnd_Callback(SLPlayItf player, void* context, SLuint32 event)
+    {
+        if(event & SL_PLAYEVENT_HEADATEND)
+        {
+            SLIAudioPlayer p = *(cast(SLIAudioPlayer*)context);
+            p.hasFinishedTrack = true;
+        }
+    }
+    static void play(ref SLIAudioPlayer audioPlayer, void* samples, uint sampleSize)
+    {
+        with(audioPlayer)
+        {
+            version(Android){(*playerAndroidSimpleBufferQueue).Enqueue(playerAndroidSimpleBufferQueue, samples, sampleSize);}
+            isPlaying = true;
+            hasFinishedTrack = false;
+
+            (*player).SetPlayState(player, SL_PLAYSTATE_PLAYING);
+        }
+    }
+    static void stop(ref SLIAudioPlayer audioPlayer)
+    {
+        with(audioPlayer)
+        {
+            (*player).SetPlayState(player, SL_PLAYSTATE_STOPPED);
+            version(Android){(*playerAndroidSimpleBufferQueue).Clear(playerAndroidSimpleBufferQueue);}
+            isPlaying = false;
+        }
+    }
+
+    static void checkFinishedPlaying(ref SLIAudioPlayer audioPlayer)
+    {
+        if(audioPlayer.isPlaying && audioPlayer.hasFinishedTrack)
+        {
+            SLIAudioPlayer.stop(audioPlayer);
+        }
+    }
+
+
+
+    static bool initializeForAndroid(ref SLIAudioPlayer output, ref SLEngineItf engine, ref SLDataSource src, ref SLDataSink dest, bool autoRegisterCallback = true)
+    {
+        string[] errs;
+        with(output)
+        {
+            mixin("const(SLInterfaceID)* ids = ["~getAndroidAudioPlayerInterfaces()~"].ptr;");
+            mixin("const(SLboolean)* req = ["~getAndroidAudioPlayerRequirements()~"].ptr;");
+
+            if(slError((*engine).CreateAudioPlayer(engine, &playerObj, &src, &dest,
+            cast(uint)(getAndroidAudioPlayerInterfaces().count(",")+1), ids, req)))
+                errs~= getSLESErr("Could not create AudioPlayer");
+            if(slError((*playerObj).Realize(playerObj, SL_BOOLEAN_FALSE)))
+                errs~= getSLESErr("Could not initialize AudioPlayer");
+
+            __android_log_print(android_LogPriority.ANDROID_LOG_DEBUG, "SLES", "Created audio player");
+            
+
+            if(slError((*playerObj).GetInterface(playerObj, SL_IID_PLAY, &player)))
+                errs~= getSLESErr("Could not get play interface for AudioPlayer");
+            if(slError((*playerObj).GetInterface(playerObj, SL_IID_VOLUME, &playerVol)))
+                errs~= getSLESErr("Could not get volume interface for AudioPlayer");
+            
+            // if(slError((*playerObj).GetInterface(playerObj, SL_IID_SEEK, &playerSeek)))
+                // errs~= getSLESErr("Could not get Seek interface for AudioPlayer");
+            if(slError((*playerObj).GetInterface(playerObj, SL_IID_EFFECTSEND, &playerEffectSend)))
+                errs~= getSLESErr("Could not get EffectSend interface for AudioPlayer");
+            if(slError((*playerObj).GetInterface(playerObj, SL_IID_METADATAEXTRACTION, &playerMetadata)))
+                errs~= getSLESErr("Could not get MetadataExtraction interface for AudioPlayer");
+            
+            version(Android)
+            {
+                if(slError((*playerObj).GetInterface(playerObj, 
+                SL_IID_ANDROIDSIMPLEBUFFERQUEUE, &playerAndroidSimpleBufferQueue)))
+                    errs~= getSLESErr("Could not get AndroidSimpleBufferQueue for AudioPlayer");
+            }
+            __android_log_print(android_LogPriority.ANDROID_LOG_DEBUG, "SLES", "Got interfaces");
+
+            if(autoRegisterCallback)
+            {
+                (*player).RegisterCallback(player, &SLIAudioPlayer.checkClipEnd_Callback, cast(void*)&output);
+                (*player).SetCallbackEventsMask(player, SL_PLAYEVENT_HEADATEND);
+            }
+            return errs.length == 0;
+        }
+    }
+}
+
+/**
+* Engine interface
+*/
+static SLObjectItf engineObject = null;
+static SLEngineItf engine;
+
+static SLIOutputMix outputMix;
+static SLIAudioPlayer gAudioPlayer;
+static short[8000] sawtoothBuffer;
+
+static void loadSawtooth()
+{
+    for(uint i =0; i < 8000; ++i)
+        sawtoothBuffer[i] = cast(short)(40_000 - ((i%100) * 220));
+        
+}
+
+version(Android){alias SLIDataLocator_Address = SLDataLocator_AndroidSimpleBufferQueue;}
+else{alias SLIDataLocator_Address = SLDataLocator_Address;}
+
+
+// SLIDataLocator_Address sliGetAddressDataLocator()
+// {
+//     SLIDataLocator_Address ret;
+//     version(Android)
+//     {
+//         ret.locatorType = SL_DATALOCATOR_ANDROIDSIMPLEBUFFERQUEUE;
+//         ret.numBuffers = 1;
+//     }
+//     else
+//     {
+//         ret.locatorType = SL_DATALOCATOR_ADDRESS;
+//         ret.pAddress = 
+//     }
+// }
+
 static BufferQueuePlayer bq;
 
 string sliCreateOutputContext()
 {
     string[] errorMessages = [];
     SLresult res = slCreateEngine(&engineObject,0,null,0,null,null);
-    if(!wasSuccess(res))
+    if(slError(res))
         errorMessages~= getSLESErr("Could not create engine");
 
     //Initialize|Realize the engine
     res = (*engineObject).Realize(engineObject, SL_BOOLEAN_FALSE);
-    if(!wasSuccess(res))
+    if(slError(res))
         errorMessages~= getSLESErr("Could not realize|initialize engine");
+    
 
     //Get the interface for being able to create child objects from the engine
     res = (*engineObject).GetInterface(engineObject, SL_IID_ENGINE, &engine);
-    if(!wasSuccess(res))
+    if(slError(res))
         errorMessages~= getSLESErr("Could not get an interface for creating objects");
+
     
-    const(SLInterfaceID)* ids = [SL_IID_ENVIRONMENTALREVERB].ptr;
-    const(SLboolean)* req = [SL_BOOLEAN_FALSE].ptr;
+    __android_log_print(android_LogPriority.ANDROID_LOG_ERROR, "SLES", "Initialized engine");
+    SLIOutputMix.initializeForAndroid(outputMix, engine);
+    loadSawtooth();
 
-    res = (*engine).CreateOutputMix(engine, &outputMixObject, 1, ids, req);
-    if(!wasSuccess(res))
-        errorMessages~= getSLESErr("Could not create an output mix");
-
-    res = (*outputMixObject).Realize(outputMixObject, SL_BOOLEAN_FALSE);
-    if(!wasSuccess(res))
-        errorMessages~= getSLESErr("Could not realize|initialize output mix");
-    
-
-    res = (*outputMixObject).GetInterface(outputMixObject, 
-          SL_IID_ENVIRONMENTALREVERB, &outputMixEnvironmentalReverb);
-    if(!wasSuccess(res))
-        errorMessages~= getSLESErr("Could not get any Reverb support");
+    version(Android)
+    {
+        SLDataLocator_AndroidSimpleBufferQueue locator;
+        locator.locatorType = SL_DATALOCATOR_ANDROIDSIMPLEBUFFERQUEUE;
+        locator.numBuffers = 1;
+    }
     else
     {
-        // res = (*outputMixEnviromentalReverb).SetEnvironmentalReverbProperties(
-        //     outputMixEnviromentalReverb, &reverbSettings
-        // );
+        SLDataLocator_Address locator;
+        locator.locatorType = SL_DATALOCATOR_ADDRESS;
+        locator.pAddress = sawtoothBuffer.ptr;
+        locator.length = 8000*2;
     }
+    //Okay
+    SLDataFormat_PCM format;
+    format.formatType = SL_DATAFORMAT_PCM;
+    format.numChannels = 1;
+    format.samplesPerSec =  SL_SAMPLINGRATE_8;
+    format.bitsPerSample = SL_PCMSAMPLEFORMAT_FIXED_16;
+    format.containerSize = SL_PCMSAMPLEFORMAT_FIXED_16;
+    format.channelMask = SL_SPEAKER_FRONT_CENTER;
+    format.endianness = SL_BYTEORDER_LITTLEENDIAN;
 
-    string msgs = "";
-    import std.conv:to;
-    for(ulong i = 0, len = errorMessages.length; i < len; i++)
-    {
-        msgs~=errorMessages[i]~"\n";
-        __android_log_print(android_LogPriority.ANDROID_LOG_FATAL, "FATAL!", errorMessages[i].ptr);
-    }
-    __android_log_print(android_LogPriority.ANDROID_LOG_FATAL, "FATAL!", "MEU DEUS MANO");
-    return msgs;
-    // return errorMessages.join("\n");
+    
+
+    //Okay
+    SLDataSource src;
+    src.pLocator = &locator;
+    src.pFormat = &format;
+
+    //Okay
+    SLDataLocator_OutputMix locatorMix;
+    locatorMix.locatorType = SL_DATALOCATOR_OUTPUTMIX;
+    locatorMix.outputMix = outputMix.outputMixObj;
+
+    __android_log_print(android_LogPriority.ANDROID_LOG_ERROR, "SLES", "Created locators");
+    //Okay
+    SLDataSink destination;
+    destination.pLocator = &locatorMix;
+    destination.pFormat = null;
+
+     SLIAudioPlayer.initializeForAndroid(gAudioPlayer, engine, src, destination);
+    __android_log_print(android_LogPriority.ANDROID_LOG_ERROR, "SLES", "Okay here");
+
+    __android_log_print(android_LogPriority.ANDROID_LOG_ERROR, "SLES", "Playing sound");
+     SLIAudioPlayer.play(gAudioPlayer, sawtoothBuffer.ptr, 8000);
+
+
+
+    
+    
+    return errorMessages.join("\n");
 }
 
-string tryCreate()
+
+// pointer and size of the next player buffer to enqueue, and number of remaining buffers
+static short *nextBuffer;
+static uint nextSize;
+static int nextCount;
+// this callback handler is called every time a buffer finishes playing
+extern(C)void bqPlayerCallback(SLAndroidSimpleBufferQueueItf bq, void *context)
 {
-    slCreateEngine( &engineObject, 0, null, 0, null, null );
-    (*engineObject).Realize( engineObject, SL_BOOLEAN_FALSE );
-    (*engineObject).GetInterface( engineObject, SL_IID_ENGINE, &engine );
-    SLObjectItf output_mix_obj;
-    SLVolumeItf output_mix_vol;
-    
-    const SLInterfaceID* ids = [SL_IID_VOLUME].ptr;
-    const SLboolean* req = [SL_BOOLEAN_FALSE].ptr;
-    
-    (*engine).CreateOutputMix( engine, &output_mix_obj, 1, ids, req );
-    
-    (*output_mix_obj).Realize( output_mix_obj, SL_BOOLEAN_FALSE );
-    
-    if( (*output_mix_obj).GetInterface( output_mix_obj,
-        SL_IID_VOLUME, &output_mix_vol ) != SL_RESULT_SUCCESS )
-        output_mix_vol = null;
-
-    return "okay?";
-
+    // for streaming playback, replace this test by logic to find and fill the next buffer
+    if (--nextCount > 0 && null != nextBuffer && 0 != nextSize) {
+        SLresult result;
+        // enqueue another buffer
+        result = (*bq).Enqueue(bq, nextBuffer, nextSize);
+        // the most likely other result is SL_RESULT_BUFFER_INSUFFICIENT,
+        // which for this code example would indicate a programming error
+        // if (SL_RESULT_SUCCESS != result) {
+        //     pthread_mutex_unlock(&audioEngineLock);
+        // }
+    } 
+    // else {
+    //     releaseResampleBuf();
+    //     pthread_mutex_unlock(&audioEngineLock);
+    // }
 }
 
-
-// void bqPlayerCallback(SLAndroidSimpleBufferQueueItf bufferQueue, void* context)
-// {
-//     assert(bufferQueue == bq.playerBufferQueue);
-//     assert(context == null);
-//     // for streaming playback, replace this test by logic to find and fill the next buffer
-//     if (--nextCount > 0 && null != nextBuffer && 0 != nextSize) 
-//     {
-//         SLresult result;
-//         // enqueue another buffer
-//         result = bq.playerBufferQueue.Enqueue(bq.playerBufferQueue, nextBuffer, nextSize);
-//         // the most likely other result is SL_RESULT_BUFFER_INSUFFICIENT,
-//         // which for this code example would indicate a programming error
-//         if (SL_RESULT_SUCCESS != result)
-//             pthread_mutex_unlock(&audioEngineLock);
-//     }
-//     else 
-//     {
-//         releaseResampleBuf();
-//         pthread_mutex_unlock(&audioEngineLock);
-//     }
-// }
-
-
-// void createBufferQueueAudioPlayer(int sampleRate, int bufferSize)
-// {
-//     SLresult res;
-
-//     if(sampleRate >= 0 && bufferSize >= 0)
-//     {
-//         bq.playerSampleRate = sampleRate*1000;
-//         bq.playerBufferSize = bufferSize;
-//     }
-//     SLDataLocator_AndroidSimpleBufferQueue buffQ = {SL_DATALOCATOR_ANDROIDSIMPLEBUFFERQUEUE, 2};
-//     SLDataFormat_PCM formatPCM = {
-//         SL_DATAFORMAT_PCM, 1, SL_SAMPLINGRATE_8,
-//         SL_PCMSAMPLEFORMAT_FIXED_16, SL_PCMSAMPLEFORMAT_FIXED_16,
-//         SL_SPEAKER_FRONT_CENTER, SL_BYTEORDER_LITTLEENDIAN
-//     };
-
-//     if(bq.playerSampleRate)
-//         formatPCM.samplesPerSec = bq.playerSampleRate;
-    
-//     SLDataSource audioSource = {&buffQ, &formatPCM};
-
-//     //Configure audio sink
-//     SLDataLocator_OutputMix outMix = {SL_DATALOCATOR_OUTPUTMIX, outputMixObject};
-//     SLDataSink audioSink = {&outMix, null};
-
-//     /**
-//     *   Create audio player:
-//     *       fast audio does not support when SL_IID_EFFECTSEND is required
-//     *       skip it for fast audio case
-//     */
-
-//     const(SLInterfaceID)* ids = [SL_IID_BUFFERQUEUE, SL_IID_VOLUME, SL_IID_EFFECTSEND /*,SL_IID_MUTESOLO*/].ptr;
-//     SLboolean* req = [SL_BOOLEAN_TRUE, SL_BOOLEAN_TRUE, SL_BOOLEAN_TRUE /*, SL_BOOLEAN_TRUE*/].ptr;
-
-//     res = (*engine).CreateAudioPlayer(engine, &bq.playerObject, &audioSource, &audioSink,
-//          bq.playerSampleRate ? 2 : 3, ids, req);
-
-//     string[] errorMessages;
-//     if(!wasSuccess(res))
-//         errorMessages~= getSLESErr("Could not create audioPlayer");
-    
-//     //Initialize audio player
-//     res = (*bq.playerObject).Realize(bq.playerObject, SL_BOOLEAN_FALSE);
-//     if(!wasSuccess(res))
-//         errorMessages~= getSLESErr("Could not realize audioPlayer");
-    
-//     //Get buffer queue interface
-//     res = (*bq.playerObject).GetInterface(bq.playerObject, SL_IID_BUFFERQUEUE, &bq.playerBufferQueue);
-//     if(!wasSuccess(res))
-//         errorMessages~= getSLESErr("Could not get buffer queue");
-
-//     //Register callback on the b queue
-//     // res = bq.playerBufferQueue.RegisterCallback(bq.playerBufferQueue, bqPlayerCallback, null);
-//     // if(!wasSuccess(res))
-//     //     errorMessages~= getSLESErr("Could not register onBufferFinish callback(bqPlayerCallback) on buffer queue");
-
-//     bq.playerEffectSend = null;
-//     if(bq.playerSampleRate == 0)
-//     {
-//         res = (*bq.playerObject).GetInterface(bq.playerObject, SL_IID_EFFECTSEND, &bq.playerEffectSend);
-//         if(!wasSuccess(res))
-//             errorMessages~= getSLESErr("Could not get effect send interface");
-//     }
-//     static if(0) 
-//     {
-//         // mute/solo is not supported for sources that are known to be mono, as this is
-//         // get the mute/solo interface
-//         res = (*bq.playerObject).GetInterface(bq.playerObject, SL_IID_MUTESOLO, &bq.playerMuteSolo);
-//         if(!wasSuccess(res))
-//             errorMessages~= getSLESErr("Could not get interface for mute/solo");
-//     }
-
-//      // get the volume interface
-//     res = (*bq.playerObject).GetInterface(bq.playerObject, SL_IID_VOLUME, &bq.playerVolume);
-//     if(!wasSuccess(res))
-//         errorMessages~= getSLESErr("Could not get the volume interface");
-
-//     // set the player's state to playing
-//     res = (*bq.playerPlay).SetPlayState(bq.playerPlay, SL_PLAYSTATE_PLAYING);
-//     if(!wasSuccess(res))
-//         errorMessages~= getSLESErr("Could not set player state to playing");
-
-
-// }
 
 final class MainActivity : JavaClass!("com.hipreme.zenambience", MainActivity)
 {
