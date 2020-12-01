@@ -29,9 +29,9 @@ import bindbc.OpenSLES.android_metadata;// #include "OpenSLES_AndroidMetadata.h"
 /*---------------------------------------------------------------------------*/
 
 extern(C):
-alias SLAint64 = const(const(sl_int64_t*));          /* 64 bit signed integer   */
+alias SLAint64 = sl_int64_t;          /* 64 bit signed integer   */
 
-alias SLAuint64 = const(const(sl_uint64_t*));         /* 64 bit unsigned integer */
+alias SLAuint64 = sl_uint64_t;         /* 64 bit unsigned integer */
 
 /*---------------------------------------------------------------------------*/
 /* Android PCM Data Format                                                   */

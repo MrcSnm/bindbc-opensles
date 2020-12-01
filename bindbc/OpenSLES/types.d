@@ -702,7 +702,7 @@ extern(C)
     struct SLDataFormat_MIME_
     {
         uint formatType;
-        ubyte* mimeType;
+        SLchar* mimeType;
         uint containerType;
     }
     alias SLDataFormat_MIME = SLDataFormat_MIME_;
